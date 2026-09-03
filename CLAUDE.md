@@ -55,7 +55,10 @@ Lean into **production patterns and best practices**. Do **not** oversimplify im
 Treat this like a shared production repo other engineers review, not a scratch cluster.
 
 - **Everything declarative, committed to the repo.** Every Kubernetes resource is a manifest under version control — never create anything imperatively (no `kubectl create namespace`, no one-off `kubectl run`). Apply with `kubectl apply -f <file>` so the file is the source of truth and every change is reviewable in a pull request.
-- **Install operators via their official Helm chart.** Prefer the vendor's Helm chart over applying raw install bundles. Keep it reproducible and reviewable: pin the chart version, commit a `values.yaml` under the tool's directory, and record the `helm repo add` / `helm install` invocation. Never apply remote URLs directly.
-- **Pin versions.** No `latest` in what we run long-term; record the pinned version so deployments are reproducible.
-- **Manifest layout:** `platform/<concern>/…` — e.g. `platform/namespaces/`, `platform/kafka/` (with `topics/` under it). Keep it organized as tools accumulate.
+- **Install operators/charts via helmfile.** [helmfile.yaml](helmfile.yaml) at the repo root is the single declarative source for all Helm releases — repositories, pinned chart versions, target namespaces, and per-release values files. Reconcile with `helmfile apply`. Never `helm install` ad hoc or apply remote URLs directly.
+- **Pin versions.** No `latest` in what we run long-term; pin the chart version in `helmfile.yaml` so deployments are reproducible.
+- **Repo layout:**
+  - `helmfile.yaml` — declares every Helm release.
+  - `helm/<tool>/values.yaml` — chart values for that release.
+  - `kubernetes/<concern>/…` — raw manifests we own directly (e.g. `kubernetes/namespaces/`). Apply with `kubectl apply -f`.
 - **Shared namespace.** The data platform's tools live in the `data-platform` namespace, reused across projects (Kafka now; Postgres, Flink, etc. later).
