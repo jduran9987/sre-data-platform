@@ -36,11 +36,11 @@ spec:
     type: persistent-claim
     size: 20Gi
   resources:
-  requests:
-    cpu: 500m
-    memory: 1Gi
-  limits:
-    memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
 
 ---
 
@@ -64,6 +64,6 @@ spec:
       transaction.state.log.min.isr: 2
       default.replication.factor: 3
       min.insync.replicas: 2
-    entityOperator:
-      topicOperator: {}
-      userOperator: {}
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
