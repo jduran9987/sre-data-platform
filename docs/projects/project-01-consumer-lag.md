@@ -35,13 +35,15 @@ The market doesn't calm down on our schedule. The pipeline has to catch up *whil
 
 ## 3. The pipeline
 
-Every trade fill emits a `TRADE_EXECUTED` event. A consumer group reads it, updates the user's positions, and writes them to the store behind the portfolio screen.
+Every trade fill emits a `TRADE_EXECUTED` event. A consumer group reads it, updates the user's positions, and writes them to the **positions store** — the pipeline's *sink* — which sits behind the portfolio screen.
 
 ```
   trade fills   ──▶  trades-events   ──▶  positions consumer   ──▶  positions store  ──▶  portfolio
-  (TRADE_          (Kafka topic,         group (updates each      (the app reads       screen in
-   EXECUTED)        partitioned)          user's holdings)         from here)           the app
+  (TRADE_          (Kafka topic,         group (updates each      (Postgres — the      screen in
+   EXECUTED)        partitioned)          user's holdings)         app reads here)      the app
 ```
+
+**The sink is Postgres.** The positions store is a Postgres database holding each user's current holdings and buying power (a natural per-user, per-symbol relational upsert). The consumer writes into it on every `TRADE_EXECUTED`; the portfolio screen reads from it. Postgres is Meridian's operational database, so it's the production-faithful store here — and because the scenario's fault is consumer lag, not sink slowness, a fast well-understood write target keeps the bottleneck where we intend it.
 
 **Where the scenario hits this pipeline:**
 
