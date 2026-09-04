@@ -40,12 +40,13 @@ Lean into **production patterns and best practices**. Do **not** oversimplify im
 Every project is documented the same way, so they read consistently and each one is a complete SRE exercise: **business-story / scenario-driven**, with the same sections and the same three modules. Use [project-01-consumer-lag.md](docs/projects/project-01-consumer-lag.md) as the reference template.
 
 **Required sections:**
-1. **The business story** — the incident as it unfolds, in business time and user impact.
-2. **The cast in play** — who is involved and the trait that changes how the incident plays out.
-3. **The pipeline** — the system under test and where the scenario hits it.
-4. **The SRE work** — what we measure (the metric), the target (the Service Level Objective), the commitment (the Service Level Agreement), and how the signals localize the fault.
-5. **Modules** — the three modules below, each with committed deliverables and a numeric exit criterion.
-6. **Definition of done** — a checklist across the modules.
+1. **What this project teaches** — the learning objectives up front: a one-line scenario summary, then the SRE skills and distributed-systems concepts to take away, and the common mistake the project guards against. Direct, not narrative.
+2. **The business story** — the incident as it unfolds, in business time and user impact.
+3. **The cast in play** — who is involved and the trait that changes how the incident plays out.
+4. **The pipeline** — the system under test and where the scenario hits it.
+5. **The SRE work** — the metric(s), the Service Level Objective, the Service Level Agreement, and how the signals localize the fault.
+6. **Modules** — the three modules below, each with committed deliverables and a numeric exit criterion.
+7. **Definition of done** — a checklist across the modules.
 
 **The three modules, always:**
 - **Module 0 — Baseline.** Stand up the pipeline and its observability; record what "healthy" looks like numerically, before anything breaks.
@@ -63,6 +64,10 @@ Every project is documented the same way, so they read consistently and each one
 - **Measure before prescribing.** When something looks off, quantify it and localize the component before suggesting a fix — model the SRE method.
 - **When debugging, give one command at a time — with its motivation.** This is the core of the learning, and it applies to both the minikube cluster and any project. Walk the diagnosis one step at a time: provide a **single** command, and alongside it explain *why it matters, what question it answers, where it's leading us, and what a healthy vs unhealthy result looks like*. Then **stop and wait** for the output before the next command. The goal is that the user never runs a command blindly — they understand the motivation for each one and have room to ask questions at every step, learning to think like an SRE. Do **not** batch multiple diagnostic commands, and do **not** jump ahead to a fix before the current step's result is in.
 - **Use precise terminology, not slang.** When explaining a concept, use the correct technical terms. No slang, jargon-as-flourish, or "witty" phrasing — it obscures the concept. Analogies are welcome, but always name the real term alongside them.
+- **Match the register to the writing.** Two modes, and know which you're in:
+  - **Informational writing** — explanations, guides, requirements, status, setup, and all chat responses. Write **dry, structured, tight, and informative**: no cute or clever framing, no fourth-wall asides, no throat-clearing ("this is the most important section…"), no rhetorical build-up. State what is true and move on. Prefer structure — short sections, bold lead-ins, bullet lists — over dense paragraphs.
+  - **Creative writing** — the business story / scenario of a project. This *should* be creative and engaging; it's a fictional incident. Creative is not the same as cute. Keep it vivid but clear and easy to read — no obscure phrasing, no jokes-as-flourish, no cleverness that gets in the way of understanding the scenario.
+  - Reference style: the "What this project teaches" and "The SRE work" sections in [project-01-consumer-lag.md](docs/projects/project-01-consumer-lag.md) show the informational tone; "The business story" and "The cast in play" show the creative tone done right.
 - **Avoid acronyms and abbreviations unless widely known.** Spell out the full term (e.g. "the Kafka custom resource", not "the Kafka CR"). If an unavoidable acronym isn't broadly recognized, expand it on first use.
 - **Be brief.** Keep responses tight to avoid cluttering context.
 - **Python docstrings.** For Python files, use Google-style docstrings at the module, class, and function level. Keep them brief and high-level — don't restate what is obvious from reading the code.

@@ -4,7 +4,30 @@
 
 ---
 
-## 1. The business story
+## 1. What this project teaches
+
+This project uses one data-platform incident to practice a set of SRE and distributed-systems skills. Read this section to know what to focus on, then work the scenario.
+
+**Scenario summary.** A volatility spike floods Meridian's trade pipeline. Every ticker except the hot one behaves normally, but users trading the hot ticker see stale portfolio balances. The task is to determine whether this is a capacity problem or something else, and to fix it.
+
+**SRE skills:**
+- Turn a business complaint ("users see wrong balances") into a measurable signal.
+- Choose the right metric, and use two forms of it to answer two questions: where the backlog is, and how much it affects users.
+- Define a Service Level Objective and justify each number by user impact.
+- Localize a fault by how a signal is distributed across partitions, not only its total.
+- Write an alert and a runbook to prevent a repeat.
+
+**Distributed-systems concepts:**
+- How Kafka partitioning and message keying determine where data lands.
+- Why a consumer group's parallelism is limited to the number of partitions.
+- Key skew and hot partitions: how uneven load is hidden by an aggregate metric.
+- Consumer lag as a measure of back-pressure, and how to distinguish skew from a capacity shortfall.
+
+**Common mistake to avoid.** When total lag rises, the reflex is to add consumers. This project shows why that does not help when the backlog is concentrated on one partition, and what to do instead.
+
+---
+
+## 2. The business story
 
 **Wednesday, March 4th, 2026 — market open.** Overnight, a heavily-shorted stock, ticker **$VOLT**, went viral. A post claiming a short squeeze was coming racked up millions of views. By the time US markets open at 9:30am ET, Meridian's app is flooded with users trying to buy.
 
@@ -23,7 +46,7 @@ The market doesn't calm down on our schedule. The pipeline has to catch up *whil
 
 ---
 
-## 2. The cast in play
+## 3. The cast in play
 
 - **Me — SRE, Data Platforms.** On call when Marcus pages. I own the pipeline's signals, and the diagnosis is mine to make. The whole project is my decision: is this a capacity problem, or something else? Get it wrong and I either waste time scaling the wrong thing or make it worse.
 
@@ -33,7 +56,7 @@ The market doesn't calm down on our schedule. The pipeline has to catch up *whil
 
 ---
 
-## 3. The pipeline
+## 4. The pipeline
 
 Every trade fill emits a `TRADE_EXECUTED` event. A consumer group reads it, updates the user's positions, and writes them to the **positions store** — the pipeline's *sink* — which sits behind the portfolio screen.
 
@@ -55,61 +78,33 @@ That last line is the whole incident: **the backlog is real, but it lives in one
 
 ---
 
-## 4. The SRE work
+## 5. The SRE work
 
-This is the most important section — the point of the project. It has four parts:
+The single metric is **consumer lag**, measured two ways.
 
-1. **What we measure** — the metric, in two forms.
-2. **The target we hold ourselves to** — the SLO, every number justified by the business.
-3. **What we've promised outside the team** — the SLA.
-4. **How the two forms of the metric localize the fault** — the diagnosis.
+**Records lag, per partition** — source: Kafka Exporter (`kafka_consumergroup_lag`). Events that have arrived but aren't yet processed, broken down by partition. The distribution across partitions is what distinguishes skew (one partition behind) from capacity (all partitions behind).
 
-### 4.1 What we measure — consumer lag, in two forms
+**Event age, p99** — source: a Prometheus metric exposed by our own consumer. Seconds from when a trade fills to when the portfolio reflects it. This is the user-facing staleness.
 
-The single metric is **consumer lag**: how far behind the consumer is. We need it in two forms because they answer different questions.
+Records lag shows *where* the backlog is; event age shows *how much* it affects users. Both are required.
 
-**Form A — Records lag, per partition** *(where the backlog is)*
-- **Source:** Kafka Exporter — `kafka_consumergroup_lag` (infrastructure metric, no app changes).
-- **Meaning:** for each partition, how many events have arrived but aren't processed yet.
-- **Why per partition:** the *shape across partitions* is the diagnosis. Even lag = the whole group is behind. Lag on one partition = skew.
+**Service Level Objective:** event age p99 < 5 seconds during market hours.
 
-**Form B — Event age, p99** *(how much it hurts the user)*
-- **Source:** our own consumer, **instrumented** to expose a Prometheus metric (Kafka can't see this — it's a fact about the app's per-event work).
-- **Meaning:** seconds from when a trade filled to when the portfolio reflects it. Literally "how stale the app is." This is what Marcus feels.
+- **Time-based** — the harm is time-based. A user acts on a stale balance; "500 records behind" is not meaningful to the business, "5 seconds stale" is.
+- **p99** — the cost is per user, per stale order. At spike volume, p95 lets too many users breach.
+- **5 seconds** — during volatility, users place follow-up orders within a few seconds. Past that, the next order rides on stale data and is rejected.
 
-> Records lag says *where the problem is*; event age says *how badly it hurts*. You can't fix seconds directly — you fix the backlog's cause, and records-per-partition lag points at it. The scenario needs both.
+**Service Level Agreement:** Meridian makes no per-second freshness promise to users, but regulators expect accurate balances. The SLO is an internal early-warning line set well inside that expectation.
 
-### 4.2 The target — the SLO, justified by the business
+**Diagnosis:**
 
-**SLO (Service Level Objective — an internal target we hold ourselves to):**
-**portfolio freshness, event age p99 < 5 seconds during market hours.**
-
-Every choice below is a business decision, not an engineering preference:
-
-- **Why a *time* SLO, not a records one?** The harm is time-shaped — a user acts on a stale screen. "500 records behind" means nothing to Marcus; "5 seconds stale" maps directly to a wrong buying-power number.
-- **Why 5 seconds?** The deadline is *the user's next action.* During volatility users fire follow-up orders within a few seconds. If buying power is stale past that gap, the next order rides on wrong data and gets rejected. Five seconds sits just inside a realistic back-to-back-order interval, with margin for normal processing jitter — tight enough to protect the decision, loose enough not to page on noise.
-- **Why p99, not p95?** The cost is **per user, per stale order.** At meme-stock volume, p95 lets 1-in-20 events breach — during a spike that's a large, visible crowd of users placing orders on stale balances. p99 caps it at 1-in-100. The tail *is* the harm, so we hold a tight percentile.
-- **Why not p99.9?** Chasing the last 0.1% costs disproportionate engineering effort and error budget for a marginal gain. We'd tighten only if incidents showed that top 0.1% causing real, repeated harm.
-
-### 4.3 The commitment — the SLA
-
-**SLA (Service Level Agreement — an external promise with consequences):** Meridian makes no per-second freshness promise to users, but **regulators expect accurate balances.** Our SLO is the internal early-warning line, set well inside that regulatory expectation, so we catch drift long before it becomes a compliance problem.
-
-### 4.4 The diagnosis — reading the two forms together
-
-The skill is knowing *which form moves, and how*:
-
-```
-  Records lag, per partition:   ONE partition climbs, the others flat   → skew, not capacity
-  Event age p99:                rises — but only for users on the hot ticker
-```
-
-- Total lag being up **tempts** Priya's "add more consumers."
-- The **per-partition shape** overrules that: one hot partition = one hot key = one worker doing the job. A consumer group's parallelism is **capped at the partition count**, so extra consumers just idle. Adding capacity cannot fix a skew problem — the correct move is to change the partitioning.
+- Records lag per partition: one partition climbing while the others stay flat means skew, not capacity.
+- Event age p99: rises only for users on the hot ticker.
+- A consumer group's parallelism is capped at the partition count, so adding consumers past that count does nothing. Skew is fixed by changing the partitioning, not by adding capacity.
 
 ---
 
-## 5. Modules
+## 6. Modules
 
 Each module produces a **committed deliverable** and has a **numeric exit criterion** — you don't move on until the number is met and the artifact exists.
 
@@ -173,7 +168,7 @@ Each module produces a **committed deliverable** and has a **numeric exit criter
 
 ---
 
-## 6. Definition of done
+## 7. Definition of done
 
 - [ ] **M0:** both lag signals live; `baseline.md` + dashboard-as-code committed; 15-min quiet-window criterion met.
 - [ ] **M1:** spike reproduced to the numeric bar (unambiguous fingerprint + SLO breached ≥5× + sustained ≥10 min); `module-1-simulation.md` + peak snapshot committed.
