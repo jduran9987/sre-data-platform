@@ -80,91 +80,113 @@ That last line is the whole incident: **the backlog is real, but it lives in one
 
 ## 5. The SRE work
 
-The single metric is **consumer lag**, measured two ways.
+**The metric.** The single metric is consumer lag, observed in two forms. Both are required: records lag shows *where* the backlog is; event age shows *how much* it affects users. Operational definitions — exact formula, unit, and dashboard panels — are in Module 0.
 
-**Records lag, per partition** — source: Kafka Exporter (`kafka_consumergroup_lag`). Events that have arrived but aren't yet processed, broken down by partition. The distribution across partitions is what distinguishes skew (one partition behind) from capacity (all partitions behind).
+Records lag, per partition
+- Records produced to a partition but not yet processed by the consumer group (source: Kafka Exporter, `kafka_consumergroup_lag`).
+- Its distribution across partitions separates the two failure modes: one partition behind is key skew; all partitions behind is a capacity shortfall.
 
-**Event age, p99** — source: a Prometheus metric exposed by our own consumer. Seconds from when a trade fills to when the portfolio reflects it. This is the user-facing staleness.
+Event age, p99
+- Seconds from when a trade fills to when the portfolio reflects it (source: a Prometheus histogram exposed by the positions consumer).
+- The user-facing staleness, and the signal the Service Level Objective is written against.
 
-Records lag shows *where* the backlog is; event age shows *how much* it affects users. Both are required.
+**Service Level Objective:** event age p99 < 5 seconds during market hours. Each term is deliberate:
+- **Time-based, not count-based** — the harm is time-based. "500 records behind" has no business meaning; "5 seconds stale" does.
+- **p99, not p95** — the cost is per user, per stale order. At spike volume, p95 leaves too many users in breach.
+- **5 seconds** — during volatility, users place follow-up orders within a few seconds; past that, the next order rides on stale data and is rejected.
 
-**Service Level Objective:** event age p99 < 5 seconds during market hours.
+**Service Level Agreement:** Meridian makes no per-second freshness promise to users, but regulators expect accurate balances. The SLO is an internal early-warning threshold set well inside that expectation.
 
-- **Time-based** — the harm is time-based. A user acts on a stale balance; "500 records behind" is not meaningful to the business, "5 seconds stale" is.
-- **p99** — the cost is per user, per stale order. At spike volume, p95 lets too many users breach.
-- **5 seconds** — during volatility, users place follow-up orders within a few seconds. Past that, the next order rides on stale data and is rejected.
-
-**Service Level Agreement:** Meridian makes no per-second freshness promise to users, but regulators expect accurate balances. The SLO is an internal early-warning line set well inside that expectation.
-
-**Diagnosis:**
-
-- Records lag per partition: one partition climbing while the others stay flat means skew, not capacity.
-- Event age p99: rises only for users on the hot ticker.
-- A consumer group's parallelism is capped at the partition count, so adding consumers past that count does nothing. Skew is fixed by changing the partitioning, not by adding capacity.
+**Diagnosis — how the signals localize the fault:**
+- Records lag per partition: one partition climbing while the others stay flat indicates key skew, not a capacity shortfall.
+- Event age p99: rises only for users trading the hot ticker.
+- Consumer-group parallelism is capped at the partition count. Adding consumers past that count does nothing; key skew is resolved by changing the partitioning, not by adding capacity.
 
 ---
 
 ## 6. Modules
 
-Each module produces a **committed deliverable** and has a **numeric exit criterion** — you don't move on until the number is met and the artifact exists.
+Each module produces committed deliverables and has numeric exit criteria. Do not advance until every exit criterion is met and every deliverable exists.
 
 ### Module 0 — Baseline
 
-**Goal:** know what "healthy" looks like, numerically, before anything breaks.
+**Goal:** establish and record the numeric "healthy" range of each signal, at a normal trade rate, before any fault is introduced.
 
-**Build:**
-- Pipeline running steadily at a normal trade rate.
-- **Records lag** wired: Kafka Exporter → Prometheus → per-partition Grafana panel.
-- **Event age** wired: instrument the consumer to record seconds from trade-fill to portfolio-write; Grafana panel for p99.
+**Signals defined here** (used by all three modules):
+
+Records lag, per partition
+- **Source:** Kafka Exporter metric `kafka_consumergroup_lag`, labeled by `topic`, `partition`, and `consumergroup`.
+- **Definition:** per partition, the partition's log-end offset minus the consumer group's committed offset — the count of records produced to that partition but not yet processed by the positions consumer.
+- **Unit:** records (integer count).
+- **Role:** localizes *where* backlog accumulates. Read as a distribution across the 6 partitions: near-zero and even is healthy; one partition rising while the others stay flat is key skew; all partitions rising is a capacity shortfall.
+- **Panel:** one time series with a line per partition.
+
+Event age, p99
+- **Source:** a Prometheus histogram exposed by the positions consumer and scraped by Prometheus.
+- **Definition:** seconds between a trade's `filled_at` timestamp (the fill time carried in the event) and the wall-clock time the consumer commits that trade's position write to Postgres. p99 is computed over the histogram with `histogram_quantile(0.99, ...)`.
+- **Unit:** seconds.
+- **Role:** user-facing staleness — how out of date the portfolio screen is. This is the signal the Service Level Objective is written against.
+- **Panel:** one time series of the p99.
+
+**Normal trade rate:** the producer emits `TRADE_EXECUTED` at a steady **25 records/second** across the full 50-symbol universe, keyed by `symbol`, with no skew (rate set by `TRADE_RATE_PER_SEC`). This is the baseline load; Module 1 departs from it.
+
+**Work:**
+1. Run the full pipeline (producer → `trades-events` → positions consumer → `meridian-postgres`) at the normal trade rate.
+2. Deploy the observability stack: Prometheus and Grafana.
+3. Wire records lag: deploy Kafka Exporter, scrape it into Prometheus, and build the per-partition Grafana panel defined above.
+4. Instrument the positions consumer to record event age as a Prometheus histogram, and build the p99 Grafana panel.
 
 **Deliverables (committed):**
-- `baseline.md` — the recorded normal range of each signal (e.g. per-partition records lag `0–N`, event age p99 `~Xs`) and the agreed SLO.
-- The Grafana dashboard **as code** (sidecar ConfigMap), so both panels are reproducible.
+- `baseline.md`, recording: the observed per-partition records-lag range over the quiet window; the observed event-age p99 over the quiet window; and the agreed Service Level Objective (event age p99 < 5s during market hours).
+- The Grafana dashboard as code (sidecar ConfigMap) containing both panels.
 
-**Exit criterion (how we know the baseline is real):**
-- Both signals live on the dashboard, and over a **15-minute quiet window**: records lag flat, near zero, and **even across partitions**; event age p99 **< 5s** the whole window. Those observed numbers are what `baseline.md` records.
+**Exit criteria:**
+- Both panels are live and populated from real pipeline traffic.
+- Over a continuous 15-minute quiet window at the normal trade rate, per-partition records lag stays near zero and even across all 6 partitions (no partition materially above the others).
+- Over that same window, event age p99 stays below 5 seconds for the entire duration.
+- `baseline.md` and the dashboard ConfigMap are committed, with `baseline.md` populated from the observed numbers above.
 
 ---
 
 ### Module 1 — Simulate the volatility spike
 
-**Goal:** reproduce the $VOLT event and prove the fault is unambiguous on the dashboard.
+**Goal:** reproduce the $VOLT incident by injecting key skew, and prove on the dashboard that the fault is unambiguous and breaches the Service Level Objective.
 
-**Inject the fault (by hand):** skew the producer so one ticker dominates, landing the surge on a single partition.
+**Work:**
+1. Skew the producer so one ticker ($VOLT) dominates the trade mix, concentrating its volume on the single partition its key hashes to. Record the injected parameters (skew percentage, target rate).
+2. Hold the injected load and observe both signals until the exit criteria are met.
 
 **Deliverables (committed):**
-- `module-1-simulation.md` — the **fault record:** the injected parameters (skew %, target rate), start/stop timestamps, and the peak value each signal reached.
-- A **dashboard snapshot** (image) captured at peak, showing the skew fingerprint.
+- `module-1-simulation.md`, recording: the injected parameters (skew %, target rate); the start and stop timestamps; and the peak value each signal reached.
+- A dashboard snapshot (image) captured at peak, showing the skew fingerprint.
 
-**Exit criterion (how we know we've spiked *enough*):** all three must hold, so there's no doubt it's skew and no doubt it hurts —
-1. **Fingerprint is unambiguous:** one partition's records lag is **clearly separated** from the others — the hot partition keeps climbing while the rest stay in baseline range.
-2. **SLO is breached with margin:** event age p99 for the hot ticker crosses the 5s SLO and keeps rising — sustain until it reaches **≥ 25s (5× the SLO)**, so it's plainly a breach, not jitter.
-3. **It's sustained, not a blip:** the above holds for **≥ 10 minutes**, and the hot partition's lag is still growing (unbounded), not plateauing at baseline.
-
-> If lag plateaus near baseline or event age never clears 5s, the spike was too small — increase the skew or rate and repeat. That's the point of a numeric bar.
+**Exit criteria:**
+- One partition's records lag is clearly separated from the rest — the hot partition keeps climbing while the others stay within their baseline range.
+- Event age p99 for the hot ticker crosses the 5s SLO and continues rising, reaching at least 25 seconds (5× the SLO).
+- Both of the above hold continuously for at least 10 minutes, with the hot partition's lag still growing (unbounded), not plateauing.
+- If any criterion is not met — lag plateaus near baseline, or event age never clears 5s — the injected load was insufficient: increase the skew or rate and repeat.
 
 ---
 
 ### Module 2 — Identify, troubleshoot, and fix
 
-**Goal:** run the real SRE loop and prove recovery, not just a dip.
+**Goal:** run the observe → localize → remediate → verify loop and prove recovery against the baseline, then commit the alert and runbook that prevent recurrence.
 
-**Identify:** read records lag *per partition* → one hot, others flat → **key skew**, not capacity. Confirm one consumer instance pinned busy while peers idle.
-
-**Root-cause call to Priya, with the graph:** parallelism is capped at partition count; her ticker-keying concentrated $VOLT on one partition; adding consumers is a no-op.
-
-**Remediate:** change partitioning so hot-ticker traffic spreads (higher-cardinality key, e.g. `symbol + user bucket`), and/or add partitions. State whether it's a *fix* (removes the cause) or a *mask* (buys time), and the ordering tradeoff.
+**Work:**
+1. **Localize:** read records lag per partition — one partition hot, the rest flat — and identify the fault as key skew, not a capacity shortfall. Confirm one consumer instance is pinned busy while its peers sit idle.
+2. **Root-cause:** establish that consumer-group parallelism is capped at the partition count, that keying by ticker concentrated $VOLT on one partition, and that adding consumers past the partition count therefore does nothing.
+3. **Remediate:** change the partitioning so hot-ticker traffic spreads across partitions (a higher-cardinality key, e.g. `symbol + user bucket`), and/or add partitions. State explicitly whether the change is a *fix* (removes the cause) or a *mask* (buys time), and state the message-ordering tradeoff it introduces.
 
 **Deliverables (committed):**
-- `module-2-remediation.md` — a **recovery record** / mini-postmortem: timeline, root cause, the fix applied, fix-vs-mask call, and the ordering tradeoff discussed with Priya.
-- The **alert rule** — per-partition lag skew (committed as code).
-- The **runbook entry** — "hot-ticker surge → check per-partition skew first; adding consumers past partition count is a no-op."
+- `module-2-remediation.md`, a recovery record / mini-postmortem: incident timeline, root cause, the change applied, the fix-vs-mask determination, and the ordering tradeoff.
+- The alert rule for per-partition lag skew, committed as code.
+- The runbook entry: hot-ticker surge → check per-partition skew first; adding consumers past the partition count is a no-op.
 
-**Exit criterion (how we know we're *back to normal*):** measured against `baseline.md`, all must hold —
-1. **Where:** per-partition records lag is back in baseline range **and even** across partitions (no single hot partition); previously-idle consumers are sharing load.
-2. **How bad:** event age p99 is back **< 5s**.
-3. **Stable, not a dip:** both hold continuously for **≥ 15 minutes** after the fix — long enough to prove recovery, not a momentary drain.
-4. **Prevention proven:** the new skew alert **fires** when replayed against the Module 1 fault (i.e. it would have paged me before Marcus).
+**Exit criteria** (measured against `baseline.md`):
+- Per-partition records lag is back within baseline range and even across partitions, with no single hot partition, and previously-idle consumers sharing load.
+- Event age p99 is back below 5 seconds.
+- Both of the above hold continuously for at least 15 minutes after the change.
+- The new skew alert fires when replayed against the Module 1 fault (it would have paged before the business noticed).
 
 ---
 
