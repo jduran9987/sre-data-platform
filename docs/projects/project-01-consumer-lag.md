@@ -128,7 +128,11 @@ Event age, p99
 - **Role:** user-facing staleness — how out of date the portfolio screen is. This is the signal the Service Level Objective is written against.
 - **Panel:** one time series of the p99.
 
-**Normal trade rate:** the producer emits `TRADE_EXECUTED` at a steady **25 records/second** across the full 50-symbol universe, keyed by `symbol`, with no skew (rate set by `TRADE_RATE_PER_SEC`). This is the baseline load; Module 1 departs from it.
+**Normal trade rate:** the producer emits `TRADE_EXECUTED` at a steady **25 records/second** across the full 50-symbol universe, keyed by `symbol`, with uniform symbol selection — no ticker is over-represented (rate set by `TRADE_RATE_PER_SEC`).
+
+Keying by `symbol` over a finite universe leaves per-partition **throughput** uneven: some partitions carry more symbols and therefore more traffic (observed: one partition ~2× the others). This imbalance is inherent to symbol-keying and cannot be eliminated, only reduced by adding symbols. It is expected in the baseline and is distinct from the deliberate single-ticker concentration injected in Module 1.
+
+The baseline is judged on **records lag** and **event age**, not on throughput uniformity: at 25 records/second the consumer keeps pace with every partition, so records lag stays near zero and even across all six even though throughput is not. Module 1 departs from this baseline by over-representing one ticker until its partition can no longer keep pace.
 
 **Work:**
 1. Run the full pipeline (producer → `trades-events` → positions consumer → `meridian-postgres`) at the normal trade rate.
