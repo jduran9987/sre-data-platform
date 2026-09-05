@@ -1,0 +1,15 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: trades-events
+  namespace: data-platform
+  labels:
+    strimzi.io/cluster: meridian-kafka
+
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    min.insync.replicas: "2"
+    retention.ms: "604800000"
+    cleanup.policy: delete

@@ -4,7 +4,7 @@ metadata:
   name: controller
   namespace: data-platform
   labels:
-    strimzi.io/cluster: meridian 
+    strimzi.io/cluster: meridian-kafka
 spec:
   replicas: 3
   roles:
@@ -32,7 +32,7 @@ metadata:
   name: broker
   namespace: data-platform
   labels:
-    strimzi.io/cluster: meridian 
+    strimzi.io/cluster: meridian-kafka
 spec:
   replicas: 3
   roles:
@@ -57,7 +57,7 @@ spec:
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
-  name: meridian
+  name: meridian-kafka
   namespace: data-platform
 spec:
   kafka:

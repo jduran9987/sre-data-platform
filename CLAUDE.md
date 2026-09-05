@@ -25,6 +25,15 @@ Work is organized as **projects**, each hyper-focused on one problem. Every proj
 1. [docs/projects/meridian.md](docs/projects/meridian.md) — the shared world: company, the data platform, and the recurring cast (reused across projects).
 2. [docs/status.md](docs/status.md) — where we are right now: the active project, work completed so far, and the next step. It links to the active project doc.
 
+### Maintaining status.md
+
+[docs/status.md](docs/status.md) has two parts, maintained differently:
+
+- **Current state** — forward-looking: the active project, the current module, and the immediate next step. **Overwrite** this as work moves; it always reflects the present, not the past.
+- **Changelog** — the historical record for the **active project only**: timestamped session summaries, **oldest first**, so reading top-to-bottom shows how the project evolved. At the end of a working session, **append** a new dated entry (`### YYYY-MM-DD — <short title>`) summarizing what changed and any details future agents need. **Never rewrite past entries** — the changelog is append-only.
+
+When a **new project** begins: clear the previous project's changelog entirely and start fresh under a heading for the new project. The changelog only ever covers the one active project.
+
 ## Focus (in priority order)
 
 1. **SRE practice** — observability, diagnosis, remediation, prevention (Service Level Objectives, alerts, runbooks). The observe → localize → remediate → verify loop is the point.
@@ -62,6 +71,7 @@ Every project is documented the same way, so they read consistently and each one
 - **Do not overwhelm.** Understand the goal, break it into the smallest useful step, and stop. Do one small step at a time.
 - **Wait for the user.** After each step, the user says when they're ready for the next one. Don't run ahead.
 - **Measure before prescribing.** When something looks off, quantify it and localize the component before suggesting a fix — model the SRE method.
+- **Confirm the symptom is real before chasing its cause.** Before any deep root-cause work, run the single decisive check that proves the problem actually exists (e.g. "are events landing?" before theorizing about why they aren't). A scary-looking log line is not proof of a broken system — verify the symptom, then diagnose. Don't build a multi-step diagnostic rabbit hole on an unverified symptom; if the user says it feels like the wrong hole, stop and re-establish the basic facts.
 - **When debugging, give one command at a time — with its motivation.** This is the core of the learning, and it applies to both the minikube cluster and any project. Walk the diagnosis one step at a time: provide a **single** command, and alongside it explain *why it matters, what question it answers, where it's leading us, and what a healthy vs unhealthy result looks like*. Then **stop and wait** for the output before the next command. The goal is that the user never runs a command blindly — they understand the motivation for each one and have room to ask questions at every step, learning to think like an SRE. Do **not** batch multiple diagnostic commands, and do **not** jump ahead to a fix before the current step's result is in.
 - **Use precise terminology, not slang.** When explaining a concept, use the correct technical terms. No slang, jargon-as-flourish, or "witty" phrasing — it obscures the concept. Analogies are welcome, but always name the real term alongside them.
 - **Match the register to the writing.** Two modes, and know which you're in:
@@ -69,7 +79,7 @@ Every project is documented the same way, so they read consistently and each one
   - **Creative writing** — the business story / scenario of a project. This *should* be creative and engaging; it's a fictional incident. Creative is not the same as cute. Keep it vivid but clear and easy to read — no obscure phrasing, no jokes-as-flourish, no cleverness that gets in the way of understanding the scenario.
   - Reference style: the "What this project teaches" and "The SRE work" sections in [project-01-consumer-lag.md](docs/projects/project-01-consumer-lag.md) show the informational tone; "The business story" and "The cast in play" show the creative tone done right.
 - **Avoid acronyms and abbreviations unless widely known.** Spell out the full term (e.g. "the Kafka custom resource", not "the Kafka CR"). If an unavoidable acronym isn't broadly recognized, expand it on first use.
-- **Be brief.** Keep responses tight to avoid cluttering context.
+- **Be brief.** Keep responses tight to avoid cluttering context. When asking the user a question, ask it plainly in as few words as possible — state the choice and stop. Don't survey every option, pre-justify at length, or wrap a simple question in paragraphs of setup.
 - **Python docstrings.** For Python files, use Google-style docstrings at the module, class, and function level. Keep them brief and high-level — don't restate what is obvious from reading the code.
 
 ## Infrastructure conventions
@@ -84,3 +94,4 @@ Treat this like a shared production repo other engineers review, not a scratch c
   - `helm/<tool>/values.yaml` — chart values for that release.
   - `kubernetes/<concern>/…` — raw manifests we own directly (e.g. `kubernetes/namespaces/`). Apply with `kubectl apply -f`.
 - **Shared namespace.** The data platform's tools live in the `data-platform` namespace, reused across projects (Kafka now; Postgres, Flink, etc. later).
+- **Name shared data-store instances `meridian-<tool>`.** Every shared cluster in `data-platform` is named for its tool — `meridian-kafka`, `meridian-postgres`, and so on — even when the operator would append the tool anyway (e.g. Strimzi's `meridian-kafka-kafka-bootstrap`). The redundancy is deliberate: operators derive child resources (Services, Secrets, pods) into a flat per-kind namespace with generic suffixes (CloudNativePG's `-rw`, `-ro`, `-1`, `-app`), so putting the tool in the instance name keeps those children self-identifying and collision-proof as more tools share the namespace. Per-project logical objects inside a shared cluster (Kafka topics, Postgres databases) are named for their domain, not suffixed by tool.

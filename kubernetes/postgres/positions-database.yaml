@@ -1,0 +1,11 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: positions
+  namespace: data-platform
+
+spec:
+  cluster:
+    name: meridian-postgres
+  name: positions
+  owner: app

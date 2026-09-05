@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trade-producer
+  namespace: project-01-consumer-lag
+  labels:
+    app: trade-producer
+    project: project-01-consumer-lag
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trade-producer
+  template:
+    metadata:
+      labels:
+        app: trade-producer
+        project: project-01-consumer-lag
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: producer
+          image: project-01-consumer-lag/producer:0.1.2
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: meridian-kafka-kafka-bootstrap.data-platform.svc.cluster.local:9092
+            - name: KAFKA_TOPIC
+              value: trades-events
+            - name: TRADE_RATE_PER_SEC
+              value: "25"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
